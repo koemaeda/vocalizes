@@ -1,0 +1,18 @@
+{
+  "name": "vocalizes",
+  "version": "1.0.0",
+  "description": "Vocal exercises app for singers",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/koemaeda/vocalizes.git"
+  },
+  "author": "Guilherme Maeda",
+  "license": "MIT",
+  "homepage": "https://github.com/koemaeda/vocalizes#readme",
+  "dependencies": {
+    "angular": ">= 1.5.0",
+    "jquery": ">= 2.2.0",
+    "midi": "git://github.com/mudcube/MIDI.js.git"
+  }
+}
