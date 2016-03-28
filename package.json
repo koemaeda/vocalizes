@@ -2,7 +2,7 @@
   "name": "vocalizes",
   "version": "1.0.0",
   "description": "Vocal exercises app for singers",
-  "main": "index.js",
+  "main": "js/main.js",
   "repository": {
     "type": "git",
     "url": "git://github.com/koemaeda/vocalizes.git"
