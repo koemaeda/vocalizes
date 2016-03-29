@@ -14,9 +14,9 @@ function Vocalize(bpm, lowestNote, highestNote) {
   this.bpm;
 
   // Play queue (for async loop)
+  this.midiTime = 0;
   this.playing = false;
-  this.queue = [];
-  this.queuePosition = 0;
+  this.eventQueue = [];
 
   // Event handlers
   this.onStart = function() { console.debug("onStart") };
@@ -63,16 +63,17 @@ function Vocalize(bpm, lowestNote, highestNote) {
    */
   this.play = function()
   {
-    // Go up
-    for (var key=this.lowestKey; key<this.highestKey; key++)
-      this.enqueueKey(key);
-    // Go down
-    for (var key=this.highestKey; key>=this.lowestKey; key--)
-      this.enqueueKey(key);
-
     this.playing = true;
     this.onStart();
-    this.processQueue();
+
+    // Go up
+    for (var key=this.lowestKey; key<this.highestKey; key++)
+      this.playKey(key);
+    // Go down
+    for (var key=this.highestKey; key>=this.lowestKey; key--)
+      this.playKey(key);
+
+    this.onMIDITime(function() { self.stop(); });
   }
 
   /**
@@ -80,98 +81,65 @@ function Vocalize(bpm, lowestNote, highestNote) {
    */
   this.stop = function()
   {
+    while (this.eventQueue.length) {
+      var source = this.eventQueue.pop();
+      if (! source) continue;
+      if (typeof(source) === "number")
+        clearTimeout(source);
+      else
+        source.stop();
+    }
     this.playing = false;
-    this.queue = [];
-    this.queuePosition = 0;
     this.onStop();
   }
 
   /**
    * Enqueue the vocalize notes for a key.
    */
-  this.enqueueKey = function(key)
+  this.playKey = function(key)
   {
-    this.enqueueEvent("changedKey", MIDI.noteToKey[key]);
+    this.onMIDITime(function() { self.onChangedKey(key); });
 
     // Play the chord
-    this.enqueueNotes(key, this.chord, 1);
-    this.enqueueNotes(key, ["rest"], (this.timeSignature - 1));
+    this.playNotes(key, this.chord, 1);
+    this.playNotes(key, ["rest"], (this.timeSignature - 1));
 
     // Play the melody
     for (var i=0; i<this.notes.length; i++)
-      this.enqueueNotes(key, [this.notes[i].note], this.notes[i].duration);
-    this.enqueueNotes(key, "rest", 1);
+      this.playNotes(key, [this.notes[i].note], this.notes[i].duration);
+    this.playNotes(key, "rest", 1);
+
+    // Play the chord again
+    this.playNotes(key, this.chord, 1);
   }
 
   /**
-   * Asynchronous loop for processing the queue
+   * Enqueue notes
    */
-  this.processQueue = function()
+  this.playNotes = function(key, notes, duration)
   {
-    var queueItem = this.queue[this.queuePosition++];
-    switch (queueItem.event) {
-      case "notes":
-        for (var i=0; i<queueItem.notes.length; i++)
-          var nextTime = this.playNote(queueItem.notes[i], queueItem.duration);
-        if (this.queuePosition == this.queue.length)
-          return this.stop();
-        setTimeout(function() {self.processQueue();}, nextTime);
-        break;
-      case "changedKey":
-        this.onChangedKey(queueItem.data);
-        setTimeout(function() {self.processQueue();}, 0);
-        break;
+    var time = this.durationToMIDITime(duration);
+    for (var i=0; i<notes.length; i++) {
+      var note = this.getMIDINote(key, notes[i]);
+      this.eventQueue.push(MIDI.noteOn(0, note, 255, this.midiTime));
+      this.eventQueue.push(MIDI.noteOff(0, note, this.midiTime + time));
     }
+    this.midiTime += time;
   }
 
   /**
-   * Adds an event to the queue
+   * Sets a timer to run a callback when the current MIDI time is reached
    */
-  this.enqueueEvent = function(event, data)
-  {
-    this.queue[this.queue.length] = {
-      event: event,
-      data: data
-    };
-  }
-  
-  /**
-   * Adds a notes to the queue
-   */
-  this.enqueueNotes = function(key, notes, duration)
-  {
-    var queueItem = {
-      event: "notes",
-      notes: [],
-      duration: duration
-    };
-    for (var i=0; i<notes.length; i++)
-      queueItem.notes[i] = this.getMIDINote(key, notes[i]);
-    this.queue[this.queue.length] = queueItem;
-  }
-
-  /**
-   * Plays a MIDI note
-   */
-  this.playNote = function(note, duration)
-  {
-    if (! this.playing) return false;
-    //console.debug("VocalizePlayer", "playing note", note, duration);
-    var time = this.durationToTime(duration);
-
-    MIDI.noteOn(0, note, 255, 0);
-    setTimeout(function() {
-      MIDI.noteOff(0, note, 0);
-    }, time);
-    return time;
+  this.onMIDITime = function(callback) {
+    this.eventQueue.push(setTimeout(callback, this.midiTime * 1000));
   };
 
   /**
-   * Calculates the duration time (in milliseconds) for a note/rest
+   * Calculates the duration time (in MIDI time) for a note/rest
    */
-  this.durationToTime = function(duration)
+  this.durationToMIDITime = function(duration)
   {
-    return (60000 / this.timeSignature / this.bpm) * duration;
+    return (100 / this.timeSignature / this.bpm) * duration;
   };
 
   /**
