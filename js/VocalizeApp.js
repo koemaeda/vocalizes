@@ -2,28 +2,28 @@
 
 function VocalizeApp()
 {
+  var self = this;
+
   this.bpm = 60;
   this.lowestNote;
   this.highestNote;
+  this.player;
 
   // Event handlers
   this.onReady = function() {};
+  this.onNoteOn = function(note) {};
+  this.onNoteOff = function(note) {};
 
   this.playVocalize = function(name)
   {
-    var vocalize = new MajorTriadVocalize(this.bpm, this.lowestNote, this.highestNote);
-    vocalize.play();
+    this.player.play(name);
   };
 
   /**
-   * Constructor - Initializes the MIDI
+   * Initializes the MIDI library
    */
-  var __construct = (function(that) {
-    // Load configuration
-    that.lowestNote = "C3";
-    that.highestNote = "D4";
-
-    // Initialize MIDI
+  this.initializeMIDI = function()
+  {
     MIDI.loadPlugin({
       soundfontUrl: "./soundfont/",
       instrument: "acoustic_grand_piano",
@@ -33,8 +33,33 @@ function VocalizeApp()
       onsuccess: function() {
         MIDI.setVolume(0, 255);
         console.debug("VocalizeApp", "MIDI initialized");
-        that.onReady();
+        self.onReady();
       }
     });
+  }
+
+  /**
+   * Initializes the Vocalize Player
+   */
+  this.initializePlayer = function()
+  {
+    this.player = new VocalizePlayer(this.bpm, this.lowestNote, this.highestNote);
+    this.player.onNoteOn = function(note) { self.onNoteOn(note); };
+    this.player.onNoteOff = function(note) { self.onNoteOff(note); };
+  }
+
+  /**
+   * Constructor - Initializes the MIDI and Player
+   */
+  var __construct = (function(that) {
+    // Load configuration
+    that.highestNote = "C5";
+    that.lowestNote = "C3";
+
+    // Initialize MIDI
+    that.initializeMIDI();
+
+    // Initialize the player
+    that.initializePlayer();
   })(this);
 }

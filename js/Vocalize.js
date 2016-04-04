@@ -1,6 +1,6 @@
 "use strict";
 
-function Vocalize(bpm, lowestNote, highestNote) {
+function Vocalize(bpm) {
   var self = this;
 
   // Implementation specific data
@@ -9,71 +9,50 @@ function Vocalize(bpm, lowestNote, highestNote) {
   this.timeSignature;
 
   // Runtime/configuration data
-  this.lowestKey;
-  this.highestKey;
   this.bpm;
 
   // Play queue (for async loop)
   this.midiTime = 0;
+  this.realTime = 0;
   this.playing = false;
   this.eventQueue = [];
 
   // Event handlers
-  this.onStart = function() { console.debug("onStart") };
-  this.onStop = function() { console.debug("onStop") };
-  this.onChangedKey = function(key) { console.debug("onChangedKey", key) };
+  this.onStart = function(key) { };
+  this.onStop = function() { };
+  this.onFinish = function() { };
+  this.onNoteOn = function(note) { };
+  this.onNoteOff = function(note) { };
 
   /**
-   * Determines the lowest key to be played according to the lowest possible note
+   * Play the vocalize for a key.
    */
-  this.setLowestKey = function(lowestNote)
-  {
-    var key = MIDI.keyToNote[lowestNote];
-
-    // Get the lowest note in the melody
-    var lowestMelodyNote = this.getMIDINote(key, this.notes[0].note);
-    for (var i=0; i<this.notes.length; i++) {
-      var note = this.getMIDINote(key, this.notes[i].note);
-      if (note < lowestMelodyNote)
-        lowestMelodyNote = note;
-    }
-    this.lowestKey = key + (key - lowestMelodyNote);
-  };
-
-  /**
-   * Determines the highest key to be played according to the highest possible note
-   */
-  this.setHighestKey = function(highestNote)
-  {
-    var key = MIDI.keyToNote[highestNote];
-
-    // Get the highest note in the melody
-    var highestMelodyNote = this.getMIDINote(key, this.notes[0].note);
-    for (var i=0; i<this.notes.length; i++) {
-      var note = this.getMIDINote(key, this.notes[i].note);
-      if (note > highestMelodyNote)
-        highestMelodyNote = note;
-    }
-    this.highestKey = key + (key - highestMelodyNote);
-  };
-
-  /**
-   * Play the vocalize for all the keys.
-   * Fills the schedule array with all the notes and rests to be played and starts the async loop.
-   */
-  this.play = function()
+  this.play = function(key)
   {
     this.playing = true;
-    this.onStart();
+    this.midiTime = 0;
+    this.realTime = 0;
+    this.onStart(key);
 
-    // Go up
-    for (var key=this.lowestKey; key<this.highestKey; key++)
-      this.playKey(key);
-    // Go down
-    for (var key=this.highestKey; key>=this.lowestKey; key--)
-      this.playKey(key);
+    console.debug("Vocalize.play", key, this);
 
-    this.onMIDITime(function() { self.stop(); });
+    // Play the chord
+    this.playNotes(key, this.chord, 2);
+    this.playNotes(key, ["rest"], 2);
+
+    // Play the melody
+    for (var i=0; i<this.notes.length; i++)
+      this.playNotes(key, [this.notes[i].note], this.notes[i].duration);
+    this.playNotes(key, "rest", 2);
+
+    // Play the chord again
+    this.playNotes(key, this.chord, 2);
+
+    console.debug(this.midiTime, this.realTime);
+    this.onMIDITime(function() {
+      self.stop();
+      self.onFinish();
+    });
   }
 
   /**
@@ -81,36 +60,21 @@ function Vocalize(bpm, lowestNote, highestNote) {
    */
   this.stop = function()
   {
+    if (! this.playing)
+      return;
+    console.debug("Vocalize.stop");
+
     while (this.eventQueue.length) {
-      var source = this.eventQueue.pop();
-      if (! source) continue;
-      if (typeof(source) === "number")
-        clearTimeout(source);
+      var eventItem = this.eventQueue.pop();
+      if (! eventItem.source) continue;
+      if (typeof(eventItem.source) === "number")
+        clearTimeout(eventItem.source);
       else
-        source.stop();
+        eventItem.source.stop();
+      clearTimeout(eventItem.timeout);
     }
     this.playing = false;
     this.onStop();
-  }
-
-  /**
-   * Enqueue the vocalize notes for a key.
-   */
-  this.playKey = function(key)
-  {
-    this.onMIDITime(function() { self.onChangedKey(key); });
-
-    // Play the chord
-    this.playNotes(key, this.chord, 1);
-    this.playNotes(key, ["rest"], (this.timeSignature - 1));
-
-    // Play the melody
-    for (var i=0; i<this.notes.length; i++)
-      this.playNotes(key, [this.notes[i].note], this.notes[i].duration);
-    this.playNotes(key, "rest", 1);
-
-    // Play the chord again
-    this.playNotes(key, this.chord, 1);
   }
 
   /**
@@ -121,10 +85,22 @@ function Vocalize(bpm, lowestNote, highestNote) {
     var time = this.durationToMIDITime(duration);
     for (var i=0; i<notes.length; i++) {
       var note = this.getMIDINote(key, notes[i]);
-      this.eventQueue.push(MIDI.noteOn(0, note, 255, this.midiTime));
-      this.eventQueue.push(MIDI.noteOff(0, note, this.midiTime + time));
+      this.eventQueue.push({
+        source: MIDI.noteOn(0, note, 255, this.midiTime),
+        timeout: this.noteCallback(this.onNoteOn, note, this.realTime)
+      });
+      this.eventQueue.push({
+        source: MIDI.noteOff(0, note, this.midiTime + time),
+        timeout: this.noteCallback(this.onNoteOff, note, this.realTime + (time * 1000))
+      });
     }
     this.midiTime += time;
+    this.realTime += (time * 1000);
+  }
+  this.noteCallback = function(callback, note, timeout) {
+    return setTimeout(function() {
+      callback(note);
+    }, timeout);
   }
 
   /**
@@ -139,7 +115,7 @@ function Vocalize(bpm, lowestNote, highestNote) {
    */
   this.durationToMIDITime = function(duration)
   {
-    return (100 / this.timeSignature / this.bpm) * duration;
+    return ((60 / this.bpm) * duration) / this.timeSignature;
   };
 
   /**
@@ -150,7 +126,7 @@ function Vocalize(bpm, lowestNote, highestNote) {
   {
     var matches = note.match(/(T|\d+)([b#-+]?)/);
     if (! matches)
-      return null;
+      return 0;
     var noteIndex = parseInt(matches[1]) || 1;
     var octaveOffset = Math.floor(noteIndex / 8) * 12;
     noteIndex %= 8;
@@ -161,6 +137,36 @@ function Vocalize(bpm, lowestNote, highestNote) {
     if (matches[2] == 'b' || matches[2] == '-') noteOffset--;
     if (matches[2] == '#' || matches[2] == '+') noteOffset++;
     return key + octaveOffset + noteOffset;
+  }
+
+  /**
+   * Gets the lowest note for a key (in the melody)
+   */
+  this.getLowestNote = function(key)
+  {
+    // Get the lowest note in the melody
+    var lowestMelodyNote = this.getMIDINote(key, this.notes[0].note);
+    for (var i=0; i<this.notes.length; i++) {
+      var note = this.getMIDINote(key, this.notes[i].note);
+      if (note < lowestMelodyNote)
+        lowestMelodyNote = note;
+    }
+    return lowestMelodyNote;
+  }
+
+  /**
+   * Gets the highest note for a key (in the melody)
+   */
+  this.getHighestNote = function(key)
+  {
+    // Get the highest note in the melody
+    var highestMelodyNote = this.getMIDINote(key, this.notes[0].note);
+    for (var i=0; i<this.notes.length; i++) {
+      var note = this.getMIDINote(key, this.notes[i].note);
+      if (note > highestMelodyNote)
+        highestMelodyNote = note;
+    }
+    return highestMelodyNote;
   }
 
   /**
@@ -178,8 +184,6 @@ function Vocalize(bpm, lowestNote, highestNote) {
    */
   var __construct = (function(that) {
     that.bpm = bpm;
-    that.setLowestKey(lowestNote);
-    that.setHighestKey(highestNote);
-    console.log("Vocalize", "Initialized", lowestNote, highestNote);
+    console.log("Vocalize", "Initialized", bpm);
   })(this);
 }
